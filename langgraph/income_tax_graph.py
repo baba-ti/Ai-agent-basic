@@ -1,16 +1,14 @@
-# %% [markdown]
-# # 2.4 생성된 답변을 여러번 검증하는 Self-RAG
-# 
-# - [Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection](https://arxiv.org/abs/2310.11511)논문을 구현합니다
-# - LangGraph 공식문서에 나온 흐름을 따라갑니다
-# ![self-rag](https://i.imgur.com/X11ND6N.png)
-
 # %%
 from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
+import os
+from langchain_openai import AzureOpenAIEmbeddings
 
-embedding_function = OpenAIEmbeddings(model='text-embedding-3-large')
-
+# embedding_function = OpenAIEmbeddings(model='text-embedding-3-large')
+embedding_function = AzureOpenAIEmbeddings(
+    model='text-embedding-3-large',
+    azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
+    api_key=os.getenv('AZURE_OPENAI_API_KEY'),
+)
 vector_store = Chroma(
     embedding_function=embedding_function,
     collection_name = 'income_tax_collection',
@@ -31,38 +29,35 @@ class AgentState(TypedDict):
 graph_builder = StateGraph(AgentState)
 
 # %%
-def retrieve(state: AgentState) -> AgentState:
+def retrieve(state: AgentState):
     query = state['query']
     docs = retriever.invoke(query)
     return {'context': docs}
 
 # %%
-from langchain_openai import ChatOpenAI
+from langchain_openai import AzureChatOpenAI
 
-llm = ChatOpenAI(model='gpt-4o')
+llm = AzureChatOpenAI(
+    azure_deployment='gpt-4o-2024-11-20',
+    api_version='2024-08-01-preview',   
+)
 
 # %%
-from langchain_classic import hub
+from langchain import hub
 
 generate_prompt = hub.pull("rlm/rag-prompt")
 
-generate_llm = ChatOpenAI(model='gpt-4o', max_completion_tokens=100)
-
-def generate(state: AgentState) -> AgentState:
-      
+def generate(state: AgentState):
     context = state['context']
     query = state['query']
-    
-    rag_chain = generate_prompt | generate_llm
-    
+    rag_chain = generate_prompt | llm
     response = rag_chain.invoke({'question': query, 'context': context})
-    
     return {'answer': response.content}
 
 # %%
-from langchain_classic import hub
+# set the LANGCHAIN_API_KEY environment variable (create key in settings)
+from langchain import hub
 from typing import Literal
-
 doc_relevance_prompt = hub.pull("langchain-ai/rag-document-relevance")
 
 def check_doc_relevance(state: AgentState) -> Literal['relevant', 'irrelevant']:
@@ -73,7 +68,6 @@ def check_doc_relevance(state: AgentState) -> Literal['relevant', 'irrelevant']:
     response = doc_relevance_chain.invoke({'question': query, 'documents': context})
 
     if response['Score'] == 1:
-        
         return 'relevant'
     
     return 'irrelevant'
@@ -90,8 +84,7 @@ rewrite_prompt = PromptTemplate.from_template(f"""
 질문: {{query}}
 """)
 
-def rewrite(state: AgentState) -> AgentState:
-    
+def rewrite(state: AgentState):
     query = state['query']
     rewrite_chain = rewrite_prompt | llm | StrOutputParser()
 
@@ -100,6 +93,7 @@ def rewrite(state: AgentState) -> AgentState:
 
 
 # %%
+# set the LANGCHAIN_API_KEY environment variable (create key in settings)
 from langchain_core.output_parsers import StrOutputParser
 
 hallucination_prompt = PromptTemplate.from_template("""
@@ -112,29 +106,25 @@ documents: {documents}
 student_answer: {student_answer}
 """)
 
-hallucination_llm = ChatOpenAI(model='gpt-4o', temperature=0)
-
 def check_hallucination(state: AgentState) -> Literal['hallucinated', 'not hallucinated']:
     answer = state['answer']
     context = state['context']
     context = [doc.page_content for doc in context]
-    hallucination_chain = hallucination_prompt | hallucination_llm | StrOutputParser()
+    hallucination_chain = hallucination_prompt | llm | StrOutputParser()
     response = hallucination_chain.invoke({'student_answer': answer, 'documents': context})
 
     return response
 
 # %%
-from langchain_classic import hub
-
+# set the LANGCHAIN_API_KEY environment variable (create key in settings)
+from langchain import hub
 helpfulness_prompt = hub.pull("langchain-ai/rag-answer-helpfulness")
 
-def check_helpfulness_grader(state: AgentState) -> str:
-    
+def check_helpfulness_grader(state: AgentState):
     query = state['query']
     answer = state['answer']
 
     helpfulness_chain = helpfulness_prompt | llm
-    
     response = helpfulness_chain.invoke({'question': query, 'student_answer': answer})
 
     if response['Score'] == 1:
@@ -142,19 +132,8 @@ def check_helpfulness_grader(state: AgentState) -> str:
     
     return 'unhelpful'
 
-def check_helpfulness(state: AgentState) -> AgentState:
-    
+def check_helpfulness(state: AgentState):
     return state
-
-# %%
-query = '연봉 5천만원인 거주자의 소득세는 얼마인가요?'
-context = retriever.invoke(query)
-generate_state = {'query': query, 'context': context}
-answer = generate(generate_state)
-# hallucination_state = {'answer':answer, 'context':context}
-helpfulness_state = {'query': query, 'answer': answer}
-
-check_helpfulness(helpfulness_state)
 
 # %%
 graph_builder.add_node('retrieve', retrieve)
