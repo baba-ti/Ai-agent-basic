@@ -9,3 +9,4 @@ venv/
 llm_application/chroma/
 *.sqlite3
 *.bin
+langgraph/google/
