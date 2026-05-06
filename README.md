@@ -5,6 +5,7 @@ Python 3.10++
 ```bash
 pip install -r requirements.txt
 ```
+
 ```bash
 pip install -U langgraph langchain-openai langchain-chroma
 pip install -U ddgs arxiv pymupdf
@@ -31,10 +32,11 @@ streamlit run llm_application/Streamlist.py
 ## Run Notebooks
 
 주요 폴더:
+
 - `langchain/`: LangChain 기본 예제
 - `llm_application/`: RAG 앱
-- `langgraph/`: LangGraph, tool calling, human-in-the-loop 
-- `Huggingface-data/`: Hugging Face 기반 
+- `langgraph/`: LangGraph, tool calling, human-in-the-loop
+- `Huggingface-data/`: Hugging Face 기반
 
 ## Gmail Tool
 
